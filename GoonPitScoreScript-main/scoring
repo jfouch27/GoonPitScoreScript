@@ -1,0 +1,122 @@
+import os.path
+
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
+# If modifying these scopes, delete the file token.json.
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"]
+
+# The ID and range of a sample spreadsheet.
+SPREADSHEET_ID = "1VAeWcK6HR8DdVMgqOw9-qldvgSMkTntYR8Qm0jRjM24"
+RANGE_NAME = "Wrestlers!A2:A"
+RANGE_NAME_KEY = "Wrestlers!B2:B"
+SCORE_NAME = "Score!B1:G9"
+SCORE_NAME_RANGE = ["Score!B1:G1","Score!B2:G2","Score!B3:G3","Score!B4:G4","Score!B5:G5","Score!B6:G6","Score!B7:G7","Score!B8:G8","Score!B9:G9"]
+def scoring(entry, exit, elims, other):
+  result = 0
+  if 1 <= exit <=10:
+    point = 1
+  elif 11 <= exit <= 20:
+    point = 2
+  elif 21 <= exit <=29:
+    point = 3
+  elif exit == 30:
+    point = 5
+  else:
+    point = 0
+  
+  result = point + (exit-entry) + elims - int(other[0])
+  if other[1] == '1':
+    result = result - 1
+    if result <= 0:
+      return 0
+  return result
+def main():
+  """Shows basic usage of the Sheets API.
+  Prints values from a sample spreadsheet.
+  """
+  creds = None
+  # The file token.json stores the user's access and refresh tokens, and is
+  # created automatically when the authorization flow completes for the first
+  # time.
+  if os.path.exists("token.json"):
+    creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+  # If there are no (valid) credentials available, let the user log in.
+  if not creds or not creds.valid:
+    if creds and creds.expired and creds.refresh_token:
+      creds.refresh(Request())
+    else:
+      flow = InstalledAppFlow.from_client_secrets_file(
+          "credentials.json", SCOPES
+      )
+      creds = flow.run_local_server(port=0)
+    # Save the credentials for the next run
+    with open("token.json", "w") as token:
+      token.write(creds.to_json())
+
+  try:
+    service = build("sheets", "v4", credentials=creds)
+
+    # Call the Sheets API
+    sheet = service.spreadsheets()
+    wrestlers = (
+        sheet.values()
+        .get(spreadsheetId=SPREADSHEET_ID, range=RANGE_NAME)
+        .execute()
+    )
+    wrestlerKeys = (
+        sheet.values()
+        .get(spreadsheetId=SPREADSHEET_ID, range=RANGE_NAME_KEY)
+        .execute()
+    )
+    scores = (
+        sheet.values()
+        .batchGet(spreadsheetId=SPREADSHEET_ID, ranges=SCORE_NAME_RANGE)
+        .execute()
+    )
+    values = []
+    keys = []
+    for val in wrestlers:
+      values.append(val)
+    for key in wrestlerKeys:
+      keys.append(key)
+    #In case we want to build up with the wrestlers
+    wre_dict = {keys[i]: values[i] for i in range(len(wrestlerKeys))}
+
+    scoreFinal = []
+    for r in scores['valueRanges']:
+        for s in r['values']:
+          score = 0
+          for val in s:
+            parsedArray = [val[i:i + 2] for i in range(0, len(val), 2)]
+            if parsedArray[0] !='00' and parsedArray[3] != '00':
+              score = score+scoring(int(parsedArray[1]),int(parsedArray[2]),int(parsedArray[4]),parsedArray[5])
+          
+            else:
+              score = score+0
+          scoreFinal.append(score)
+    
+    finalValues =[[scoreFinal[0]],[scoreFinal[1]],[scoreFinal[2]],[scoreFinal[3]],[scoreFinal[4]],[scoreFinal[5]],[scoreFinal[6]],[scoreFinal[7]],[scoreFinal[8]]]
+    body = {"values": finalValues}
+    result = (
+      sheet.values()
+      .update(
+      spreadsheetId=SPREADSHEET_ID, 
+      range="Result!B1:B9",
+      valueInputOption="RAW",
+      body = body
+      ).execute()
+    )    
+    if not values:
+      print("No data found.")
+      return
+  except HttpError as err:
+      print(err)
+
+
+if __name__ == "__main__":
+  main()
